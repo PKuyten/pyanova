@@ -117,14 +117,14 @@ class PyAnova(object):
         PyAnova.cb_cond.notify()
         PyAnova.cb_cond.release()
 
-    def __init__(self, auto_connect=True, logger=DEFAULT_LOGGER, debug=False):
+    def __init__(self, auto_connect=True, logger=DEFAULT_LOGGER, debug=False, use_handle=True):
         """This is the constructor for a pyanova.PyAnova object
         
         there are two ways of constructing a PyAnova object: 'auto mode' and 'manual mode'
         
         * 'auto mode': see `PyAnova.auto_connect()`_
         * 'manual mode': would not discover or connect to any device
-
+        * 'use_handle': use handle or let gattool discover it when sending messages
         Args:
             auto_connect (bool): to use auto mode or not
             logger (logging.Logger): logger, defualt to `DEFAULT_LOGGER`_
@@ -133,9 +133,12 @@ class PyAnova(object):
         """
         self._dev = None
         self._adapter = pygatt.GATTToolBackend()
-        self._logger = DEFAULT_LOGGER
+        self._logger = logger
         if debug: self._logger.setLevel(logging.DEBUG)
         if auto_connect: self.auto_connect()
+        self._use_handle = use_handle
+        self._indication = None
+        self._notification_uuid = None
 
     def __del__(self):
         """This is the destructor for a pyanova.PyAnova object
@@ -208,7 +211,14 @@ class PyAnova(object):
             return devices
         return list(filter(lambda dev: dev_mac_pattern.match(dev['address']), devices))
 
-    def connect_device(self, dev_prop, notification_uuid=DEVICE_NOTIFICATION_CHAR_UUID):
+    def connect_device(
+        self,
+        dev_prop,
+        notification_uuid=DEVICE_NOTIFICATION_CHAR_UUID,
+        indication=True,
+        reset_on_start=True,
+        timeout=DEFAULT_TIMEOUT_SEC,
+    ):
         """This function connects to an Anova device and register for notification
 
         Args:
@@ -217,14 +227,18 @@ class PyAnova(object):
             notification_uuid: the notification uuid to subscribe to, default to `DEVICE_NOTIFICATION_CHAR_UUID`_
                                this value should be constant for all Anova Bluetooth-only devices and can be discover
                                with gatt tool.
-        
+            indication: use indications (where each notificaiton is ACKd). This is more reliable, but slower.
+            reset_on_start: Perhaps due to a bug in gatttol or pygatt, 
+                            but if the bluez backend isn't restarted, it can sometimes lock up
+                            the computer when trying to make a connection to HCI device.
+            timeout (float): connect timeout setting
         """
         self._logger.info('Starting PyAnova BLE adapter')
-        self._adapter.start()
+        self._adapter.start(reset_on_start=reset_on_start)
         self._logger.info('Connecting to Anova device: %s'%str(dev_prop))
         self._dev = self._adapter.connect(dev_prop['address'])
         self._logger.info('Connected to: %s'%str(dev_prop))
-        self._dev.subscribe(notification_uuid, callback=PyAnova.indication_callback, indication=True)
+        self._dev.subscribe(notification_uuid, callback=PyAnova.indication_callback, indication=indication)
         self._logger.info('Subscribed to notification handle: %s'%notification_uuid)
 
     def disconnect(self):
@@ -258,7 +272,7 @@ class PyAnova(object):
 
         Args:
             strcmd (str): command in string
-            handle (int): handle of the receiver to send to
+            handle (int): handle of the receiver to send to, is ignored if use_handle is set to False
             cmd_timeout (float): timeout for waiting for response
 
         Returns:
@@ -275,8 +289,14 @@ class PyAnova(object):
         PyAnova.cb_resp = None
         self._logger.debug('Acquiring callback condition lock for [%s]'%strcmd)
         PyAnova.cb_cond.acquire(True)
-        self._logger.debug('Writing %s to handle: 0x%x'%(strcmd, handle))
-        self._dev.char_write_handle(handle, bytedata)
+
+        if self._use_handle:
+            self._logger.debug('Writing %s to handle: 0x%x'%(strcmd, handle))
+            self._dev.char_write_handle(handle, bytedata)
+        else:
+            self._logger.debug('Writing %s to uuid: %s'%(strcmd, self._notification_uuid))
+            self._dev.char_write(self._notification_uuid, bytedata, self._indication)
+
         self._logger.debug('Waiting for response from callback, timeout: %.2f'%cmd_timeout)
         PyAnova.cb_cond.wait(cmd_timeout)
         self._logger.debug('Processing response from callback')
