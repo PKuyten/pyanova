@@ -238,6 +238,8 @@ class PyAnova(object):
         self._logger.info('Connecting to Anova device: %s'%str(dev_prop))
         self._dev = self._adapter.connect(dev_prop['address'])
         self._logger.info('Connected to: %s'%str(dev_prop))
+        self._notification_uuid = notification_uuid
+        self._indication = indication
         self._dev.subscribe(notification_uuid, callback=PyAnova.indication_callback, indication=indication)
         self._logger.info('Subscribed to notification handle: %s'%notification_uuid)
 
