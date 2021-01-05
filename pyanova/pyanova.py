@@ -236,7 +236,7 @@ class PyAnova(object):
         self._logger.info('Starting PyAnova BLE adapter')
         self._adapter.start(reset_on_start=reset_on_start)
         self._logger.info('Connecting to Anova device: %s'%str(dev_prop))
-        self._dev = self._adapter.connect(dev_prop['address'])
+        self._dev = self._adapter.connect(dev_prop['address'], timeout)
         self._logger.info('Connected to: %s'%str(dev_prop))
         self._notification_uuid = notification_uuid
         self._indication = indication
